@@ -1,0 +1,13 @@
+{
+  "name": "Zoom SMS Widget Clean",
+  "version": "1.0",
+  "platform": "crm",
+  "location": {
+    "Contacts": {
+      "url": "index.html"
+    },
+    "Leads": {
+      "url": "index.html"
+    }
+  }
+}
