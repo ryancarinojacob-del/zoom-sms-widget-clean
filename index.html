@@ -19,6 +19,15 @@
       placeholder="+1XXXXXXXXXX"
     />
 
+    <label style="display:block; margin-bottom:6px;">Quick Templates</label>
+    <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
+      <button type="button" onclick="applyTemplate('intro')" style="padding:8px 12px; cursor:pointer;">Intro</button>
+      <button type="button" onclick="applyTemplate('followup')" style="padding:8px 12px; cursor:pointer;">Follow-Up</button>
+      <button type="button" onclick="applyTemplate('docs')" style="padding:8px 12px; cursor:pointer;">Request Docs</button>
+      <button type="button" onclick="applyTemplate('received')" style="padding:8px 12px; cursor:pointer;">Docs Received</button>
+      <button type="button" onclick="applyTemplate('birthday')" style="padding:8px 12px; cursor:pointer;">Birthday 🎉</button>
+    </div>
+
     <label style="display:block; margin-bottom:6px;">Message</label>
     <textarea
       id="smsMessage"
@@ -70,12 +79,21 @@
     let currentRecordId = "";
     let currentModule = "";
     let currentRecipientName = "";
+    let currentRecipientFirstName = "";
     let currentContactId = "";
     let currentDealId = "";
 
     const SEND_SMS_URL = "/.netlify/functions/send-sms";
     const ZOOM_FROM_NUMBER = "+15873333519";
     const SMS_LOGS_MODULE = "SMS_Logs";
+
+    const TEMPLATES = {
+      intro: "Hi {{firstName}}, this is Ryan Jacob from Verico Compass Mortgage Group. I’m just reaching out regarding your mortgage file. Please feel free to reply here if you have any questions.",
+      followup: "Hi {{firstName}}, just following up on my previous message regarding your mortgage file. Let me know if you have any questions or if you need anything from me.",
+      docs: "Hi {{firstName}}, when you have a moment, please send over the requested documents for your mortgage file. Once received, I’ll review everything and update you right away.",
+      received: "Hi {{firstName}}, thank you. I’ve received your documents and will review them shortly. I’ll update you as soon as I’m done.",
+      birthday: "Happy Birthday {{firstName}}! 🎉 Wishing you a fantastic day and all the best for the year ahead. – Ryan"
+    };
 
     function normalizePhone(phone) {
       if (!phone) return "";
@@ -130,6 +148,34 @@
 
       if (fullName) return fullName;
       return contact.Full_Name || contact.full_name || "Primary Contact";
+    }
+
+    function getFirstNameFromRecord(record) {
+      return (
+        record.First_Name ||
+        record.first_name ||
+        ""
+      ).trim();
+    }
+
+    function getFirstNameFromFullName(fullName) {
+      const clean = String(fullName || "").trim();
+      if (!clean) return "";
+      return clean.split(" ")[0];
+    }
+
+    function fillTemplate(templateText) {
+      const firstName = currentRecipientFirstName || "there";
+      return templateText.replace(/{{firstName}}/g, firstName);
+    }
+
+    function applyTemplate(templateKey) {
+      const template = TEMPLATES[templateKey];
+      if (!template) return;
+
+      document.getElementById("smsMessage").value = fillTemplate(template);
+      document.getElementById("smsMessage").focus();
+      setStatus("Template applied.", false);
     }
 
     async function getRecord(entity, recordId) {
@@ -277,6 +323,7 @@
         moduleName.slice(0, -1);
 
       currentRecipientName = displayName;
+      currentRecipientFirstName = getFirstNameFromRecord(record) || getFirstNameFromFullName(displayName);
       currentContactId = moduleName === "Contacts" ? recordId : "";
       currentDealId = "";
 
@@ -306,6 +353,7 @@
 
       if (!contactLookup || !contactLookup.id) {
         currentContactId = "";
+        currentRecipientFirstName = "";
         setRecordInfo("Deal: " + dealName);
         setStatus("No primary contact linked to this Deal.", true);
         await loadConversation();
@@ -317,6 +365,7 @@
 
       if (!contact) {
         currentContactId = "";
+        currentRecipientFirstName = "";
         setRecordInfo("Deal: " + dealName);
         setStatus("Could not load primary contact from this Deal.", true);
         await loadConversation();
@@ -327,6 +376,7 @@
       const contactName = getNameFromContact(contact);
 
       currentRecipientName = contactName;
+      currentRecipientFirstName = getFirstNameFromRecord(contact) || getFirstNameFromFullName(contactName);
       currentContactId = contactId;
 
       document.getElementById("phone").value = phone;
