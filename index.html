@@ -9,6 +9,8 @@
   <div style="padding:16px; font-family: Arial, sans-serif;">
     <h3 style="margin-top:0;">Send Zoom SMS</h3>
 
+    <div id="recordInfo" style="margin-bottom:12px; font-size:13px; color:#555;"></div>
+
     <label style="display:block; margin-bottom:6px;">Phone Number</label>
     <input
       id="phone"
@@ -39,6 +41,7 @@
   <script>
     let currentRecordId = "";
     let currentModule = "";
+    let currentRecipientName = "";
 
     const SEND_SMS_URL = "/.netlify/functions/send-sms";
     const ZOOM_FROM_NUMBER = "+15873333519";
@@ -67,6 +70,10 @@
       btn.innerText = isSending ? "Sending..." : "Send SMS";
     }
 
+    function setRecordInfo(text) {
+      document.getElementById("recordInfo").innerText = text || "";
+    }
+
     function getPhoneFromRecord(record) {
       return (
         record.Mobile ||
@@ -75,6 +82,94 @@
         record.phone ||
         ""
       );
+    }
+
+    function getNameFromContact(contact) {
+      const firstName = contact.First_Name || "";
+      const lastName = contact.Last_Name || "";
+      const fullName = (firstName + " " + lastName).trim();
+
+      if (fullName) return fullName;
+      return contact.Full_Name || contact.full_name || "Primary Contact";
+    }
+
+    async function getRecord(entity, recordId) {
+      const response = await ZOHO.CRM.API.getRecord({
+        Entity: entity,
+        RecordID: recordId
+      });
+
+      if (response && response.data && response.data.length > 0) {
+        return response.data[0];
+      }
+
+      return null;
+    }
+
+    async function loadContactOrLead(recordId, moduleName) {
+      const record = await getRecord(moduleName, recordId);
+
+      if (!record) {
+        setStatus("Failed to load CRM record.", true);
+        return;
+      }
+
+      const phone = normalizePhone(getPhoneFromRecord(record));
+      const displayName =
+        record.Full_Name ||
+        ((record.First_Name || "") + " " + (record.Last_Name || "")).trim() ||
+        moduleName.slice(0, -1);
+
+      currentRecipientName = displayName;
+
+      document.getElementById("phone").value = phone;
+      setRecordInfo("Recipient: " + displayName);
+
+      if (phone) {
+        setStatus("Record loaded.", false);
+      } else {
+        setStatus("No phone number found on this record.", true);
+      }
+    }
+
+    async function loadDeal(recordId) {
+      const deal = await getRecord("Deals", recordId);
+
+      if (!deal) {
+        setStatus("Failed to load Deal record.", true);
+        return;
+      }
+
+      const dealName = deal.Deal_Name || deal.Name || "Deal";
+      const contactLookup = deal.Contact_Name;
+
+      if (!contactLookup || !contactLookup.id) {
+        setRecordInfo("Deal: " + dealName);
+        setStatus("No primary contact linked to this Deal.", true);
+        return;
+      }
+
+      const contactId = contactLookup.id;
+      const contact = await getRecord("Contacts", contactId);
+
+      if (!contact) {
+        setRecordInfo("Deal: " + dealName);
+        setStatus("Could not load primary contact from this Deal.", true);
+        return;
+      }
+
+      const phone = normalizePhone(getPhoneFromRecord(contact));
+      const contactName = getNameFromContact(contact);
+
+      currentRecipientName = contactName;
+      document.getElementById("phone").value = phone;
+      setRecordInfo("Deal: " + dealName + " | Recipient: " + contactName);
+
+      if (phone) {
+        setStatus("Deal contact loaded.", false);
+      } else {
+        setStatus("Primary contact has no phone number.", true);
+      }
     }
 
     ZOHO.embeddedApp.on("PageLoad", async function(data) {
@@ -89,26 +184,16 @@
           return;
         }
 
-        const response = await ZOHO.CRM.API.getRecord({
-          Entity: currentModule,
-          RecordID: currentRecordId
-        });
+        setRecordInfo("Loading...");
+        console.log("Current module:", currentModule, "Record ID:", currentRecordId);
 
-        console.log("CRM record response:", response);
-
-        if (response && response.data && response.data.length > 0) {
-          const record = response.data[0];
-          const phone = normalizePhone(getPhoneFromRecord(record));
-
-          document.getElementById("phone").value = phone;
-
-          if (phone) {
-            setStatus("Record loaded.", false);
-          } else {
-            setStatus("No phone number found on this record.", true);
-          }
+        if (currentModule === "Contacts" || currentModule === "Leads") {
+          await loadContactOrLead(currentRecordId, currentModule);
+        } else if (currentModule === "Deals") {
+          await loadDeal(currentRecordId);
         } else {
-          setStatus("Failed to load CRM record.", true);
+          setRecordInfo("Module: " + currentModule);
+          setStatus("This widget currently supports Contacts, Leads, and Deals only.", true);
         }
       } catch (err) {
         console.error("Widget load error:", err);
@@ -169,7 +254,10 @@
         console.log("Parsed result:", result);
 
         if (result.ok) {
-          setStatus("SMS sent successfully.", false);
+          const successLabel = currentRecipientName
+            ? "SMS sent successfully to " + currentRecipientName + "."
+            : "SMS sent successfully.";
+          setStatus(successLabel, false);
           document.getElementById("smsMessage").value = "";
         } else {
           setStatus("Send failed: " + (result.error || "Unknown error"), true);
