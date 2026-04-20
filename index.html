@@ -22,33 +22,63 @@
     <label style="display:block; margin-bottom:6px;">Message</label>
     <textarea
       id="smsMessage"
-      rows="6"
+      rows="5"
       style="width:100%; padding:8px; margin-bottom:12px; box-sizing:border-box;"
       placeholder="Type your message here..."
     ></textarea>
 
-    <button
-      id="sendBtn"
-      onclick="sendSms()"
-      style="padding:10px 16px; cursor:pointer;"
-    >
-      Send SMS
-    </button>
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+      <button
+        id="sendBtn"
+        onclick="sendSms()"
+        style="padding:10px 16px; cursor:pointer;"
+      >
+        Send SMS
+      </button>
 
-    <div id="status" style="margin-top:12px; min-height:20px;"></div>
+      <button
+        id="refreshBtn"
+        onclick="loadConversation()"
+        style="padding:10px 16px; cursor:pointer;"
+      >
+        Refresh Thread
+      </button>
+
+      <div id="status" style="min-height:20px; font-size:13px;"></div>
+    </div>
+
+    <div style="margin-top:10px;">
+      <div style="font-weight:bold; margin-bottom:8px;">Conversation</div>
+      <div
+        id="conversation"
+        style="
+          border:1px solid #ddd;
+          border-radius:8px;
+          padding:12px;
+          min-height:220px;
+          max-height:420px;
+          overflow-y:auto;
+          background:#fafafa;
+        "
+      >
+        <div style="color:#777; font-size:13px;">Loading conversation...</div>
+      </div>
+    </div>
   </div>
 
   <script>
     let currentRecordId = "";
     let currentModule = "";
     let currentRecipientName = "";
+    let currentContactId = "";
+    let currentDealId = "";
 
     const SEND_SMS_URL = "/.netlify/functions/send-sms";
     const ZOOM_FROM_NUMBER = "+15873333519";
+    const SMS_LOGS_MODULE = "SMS_Logs";
 
     function normalizePhone(phone) {
       if (!phone) return "";
-
       const digits = String(phone).replace(/\D/g, "");
 
       if (!digits) return "";
@@ -56,6 +86,15 @@
       if (digits.length === 11 && digits.startsWith("1")) return "+" + digits;
 
       return "+" + digits;
+    }
+
+    function escapeHtml(value) {
+      return String(value || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
     }
 
     function setStatus(message, isError) {
@@ -106,6 +145,123 @@
       return null;
     }
 
+    function formatDateTime(value) {
+      if (!value) return "";
+
+      try {
+        const dt = new Date(value);
+        if (isNaN(dt.getTime())) return value;
+
+        return dt.toLocaleString("en-CA", {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit"
+        });
+      } catch (e) {
+        return value;
+      }
+    }
+
+    function normalizeDirection(log) {
+      const direction = (log.Direction || log.Direction_Sort || "").toLowerCase();
+
+      if (direction.includes("incoming")) return "incoming";
+      if (direction.includes("outgoing")) return "outgoing";
+
+      return "unknown";
+    }
+
+    function renderConversation(logs) {
+      const container = document.getElementById("conversation");
+
+      if (!logs || logs.length === 0) {
+        container.innerHTML = '<div style="color:#777; font-size:13px;">No SMS history found yet.</div>';
+        return;
+      }
+
+      const sortedLogs = logs.slice().sort((a, b) => {
+        const aTime = new Date(a.Event_Time || a.Created_Time || 0).getTime();
+        const bTime = new Date(b.Event_Time || b.Created_Time || 0).getTime();
+        return aTime - bTime;
+      });
+
+      let html = "";
+
+      for (const log of sortedLogs) {
+        const direction = normalizeDirection(log);
+        const isOutgoing = direction === "outgoing";
+        const message = escapeHtml(log.Message_Text || "");
+        const eventTime = formatDateTime(log.Event_Time || log.Created_Time || "");
+        const phone = escapeHtml(log.Phone || "");
+        const bubbleBg = isOutgoing ? "#dff4ff" : "#ffffff";
+        const align = isOutgoing ? "flex-end" : "flex-start";
+        const label = isOutgoing ? "Outgoing" : "Incoming";
+
+        html += `
+          <div style="display:flex; justify-content:${align}; margin-bottom:10px;">
+            <div style="
+              max-width:80%;
+              background:${bubbleBg};
+              border:1px solid #d9d9d9;
+              border-radius:10px;
+              padding:10px 12px;
+              box-sizing:border-box;
+            ">
+              <div style="font-size:11px; color:#666; margin-bottom:4px;">
+                ${label}${phone ? " • " + phone : ""}${eventTime ? " • " + escapeHtml(eventTime) : ""}
+              </div>
+              <div style="font-size:14px; color:#222; white-space:pre-wrap;">${message || "(No text)"}</div>
+            </div>
+          </div>
+        `;
+      }
+
+      container.innerHTML = html;
+      container.scrollTop = container.scrollHeight;
+    }
+
+    async function searchSmsLogsByCriteria(criteria) {
+      const response = await ZOHO.CRM.API.searchRecord({
+        Entity: SMS_LOGS_MODULE,
+        Type: "criteria",
+        Query: criteria
+      });
+
+      console.log("SMS search response:", response);
+
+      if (response && response.data && Array.isArray(response.data)) {
+        return response.data;
+      }
+
+      return [];
+    }
+
+    async function loadConversation() {
+      try {
+        const container = document.getElementById("conversation");
+        container.innerHTML = '<div style="color:#777; font-size:13px;">Loading conversation...</div>';
+
+        let logs = [];
+
+        if (currentModule === "Deals" && currentDealId) {
+          logs = await searchSmsLogsByCriteria(`(Related_Deal:equals:${currentDealId})`);
+        } else if ((currentModule === "Contacts" || currentModule === "Leads") && currentRecordId) {
+          const lookupField = currentModule === "Contacts" ? "Related_Contact" : "Related_Lead";
+          logs = await searchSmsLogsByCriteria(`(${lookupField}:equals:${currentRecordId})`);
+        } else if (currentContactId) {
+          logs = await searchSmsLogsByCriteria(`(Related_Contact:equals:${currentContactId})`);
+        }
+
+        renderConversation(logs);
+      } catch (err) {
+        console.error("Load conversation error:", err);
+        document.getElementById("conversation").innerHTML =
+          '<div style="color:red; font-size:13px;">Failed to load conversation.</div>';
+      }
+    }
+
     async function loadContactOrLead(recordId, moduleName) {
       const record = await getRecord(moduleName, recordId);
 
@@ -121,6 +277,8 @@
         moduleName.slice(0, -1);
 
       currentRecipientName = displayName;
+      currentContactId = moduleName === "Contacts" ? recordId : "";
+      currentDealId = "";
 
       document.getElementById("phone").value = phone;
       setRecordInfo("Recipient: " + displayName);
@@ -130,6 +288,8 @@
       } else {
         setStatus("No phone number found on this record.", true);
       }
+
+      await loadConversation();
     }
 
     async function loadDeal(recordId) {
@@ -142,10 +302,13 @@
 
       const dealName = deal.Deal_Name || deal.Name || "Deal";
       const contactLookup = deal.Contact_Name;
+      currentDealId = recordId;
 
       if (!contactLookup || !contactLookup.id) {
+        currentContactId = "";
         setRecordInfo("Deal: " + dealName);
         setStatus("No primary contact linked to this Deal.", true);
+        await loadConversation();
         return;
       }
 
@@ -153,8 +316,10 @@
       const contact = await getRecord("Contacts", contactId);
 
       if (!contact) {
+        currentContactId = "";
         setRecordInfo("Deal: " + dealName);
         setStatus("Could not load primary contact from this Deal.", true);
+        await loadConversation();
         return;
       }
 
@@ -162,6 +327,8 @@
       const contactName = getNameFromContact(contact);
 
       currentRecipientName = contactName;
+      currentContactId = contactId;
+
       document.getElementById("phone").value = phone;
       setRecordInfo("Deal: " + dealName + " | Recipient: " + contactName);
 
@@ -170,6 +337,8 @@
       } else {
         setStatus("Primary contact has no phone number.", true);
       }
+
+      await loadConversation();
     }
 
     ZOHO.embeddedApp.on("PageLoad", async function(data) {
@@ -194,6 +363,7 @@
         } else {
           setRecordInfo("Module: " + currentModule);
           setStatus("This widget currently supports Contacts, Leads, and Deals only.", true);
+          renderConversation([]);
         }
       } catch (err) {
         console.error("Widget load error:", err);
@@ -257,8 +427,13 @@
           const successLabel = currentRecipientName
             ? "SMS sent successfully to " + currentRecipientName + "."
             : "SMS sent successfully.";
+
           setStatus(successLabel, false);
           document.getElementById("smsMessage").value = "";
+
+          setTimeout(async function() {
+            await loadConversation();
+          }, 1200);
         } else {
           setStatus("Send failed: " + (result.error || "Unknown error"), true);
         }
