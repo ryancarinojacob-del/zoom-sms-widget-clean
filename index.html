@@ -220,53 +220,59 @@
     }
 
     function renderConversation(logs) {
-      const container = document.getElementById("conversation");
+  const container = document.getElementById("conversation");
 
-      if (!logs || logs.length === 0) {
-        container.innerHTML = '<div style="color:#777; font-size:13px;">No SMS history found yet.</div>';
-        return;
-      }
+  if (!logs || logs.length === 0) {
+    container.innerHTML = '<div style="color:#777; font-size:13px;">No SMS history found yet.</div>';
+    return;
+  }
 
-      const sortedLogs = logs.slice().sort((a, b) => {
-        const aTime = new Date(a.Event_Time || a.Created_Time || 0).getTime();
-        const bTime = new Date(b.Event_Time || b.Created_Time || 0).getTime();
-        return aTime - bTime;
-      });
+  const sortedLogs = logs.slice().sort((a, b) => {
+    const aTime = new Date(a.Event_Time || a.Created_Time || 0).getTime();
+    const bTime = new Date(b.Event_Time || b.Created_Time || 0).getTime();
+    return aTime - bTime;
+  });
 
-      let html = "";
+  let html = "";
 
-      for (const log of sortedLogs) {
-        const direction = normalizeDirection(log);
-        const isOutgoing = direction === "outgoing";
-        const message = escapeHtml(log.Message_Text || "");
-        const eventTime = formatDateTime(log.Event_Time || log.Created_Time || "");
-        const phone = escapeHtml(log.Phone || "");
-        const bubbleBg = isOutgoing ? "#dff4ff" : "#ffffff";
-        const align = isOutgoing ? "flex-end" : "flex-start";
-        const label = isOutgoing ? "Outgoing" : "Incoming";
+  for (const log of sortedLogs) {
+    const direction = normalizeDirection(log);
+    const isOutgoing = direction === "outgoing";
 
-        html += `
-          <div style="display:flex; justify-content:${align}; margin-bottom:10px;">
-            <div style="
-              max-width:80%;
-              background:${bubbleBg};
-              border:1px solid #d9d9d9;
-              border-radius:10px;
-              padding:10px 12px;
-              box-sizing:border-box;
-            ">
-              <div style="font-size:11px; color:#666; margin-bottom:4px;">
-                ${label}${phone ? " • " + phone : ""}${eventTime ? " • " + escapeHtml(eventTime) : ""}
-              </div>
-              <div style="font-size:14px; color:#222; white-space:pre-wrap;">${message || "(No text)"}</div>
-            </div>
+    const message = escapeHtml(log.Message_Text || "");
+    const time = formatDateTime(log.Event_Time || log.Created_Time || "");
+
+    html += `
+      <div style="display:flex; justify-content:${isOutgoing ? "flex-end" : "flex-start"}; margin-bottom:6px;">
+        <div style="
+          max-width:70%;
+          padding:10px 14px;
+          border-radius:18px;
+          background:${isOutgoing ? "#007aff" : "#f1f1f1"};
+          color:${isOutgoing ? "#fff" : "#222"};
+          font-size:14px;
+          line-height:1.4;
+          box-shadow:0 1px 2px rgba(0,0,0,0.08);
+        ">
+          <div style="white-space:pre-wrap;">${message || "(No text)"}</div>
+          <div style="
+            font-size:10px;
+            margin-top:4px;
+            opacity:0.6;
+            text-align:right;
+          ">
+            ${time}
           </div>
-        `;
-      }
+        </div>
+      </div>
+    `;
+  }
 
-      container.innerHTML = html;
-      container.scrollTop = container.scrollHeight;
-    }
+  container.innerHTML = html;
+
+  // 🔥 auto scroll to latest
+  container.scrollTop = container.scrollHeight;
+}
 
     async function searchSmsLogsByCriteria(criteria) {
       const response = await ZOHO.CRM.API.searchRecord({
