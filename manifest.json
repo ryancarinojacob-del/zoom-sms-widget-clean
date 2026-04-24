@@ -8,6 +8,9 @@
     },
     "Leads": {
       "url": "index.html"
+    },
+    "Deals": {
+      "url": "index.html"
     }
   }
 }
